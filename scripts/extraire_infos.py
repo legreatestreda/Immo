@@ -54,6 +54,7 @@ def get_drive_service():
     )
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
+
 def lister_zips(service):
     resultats, page_token = [], None
     while True:
@@ -148,7 +149,7 @@ def extraire_taille_equipe(texte: str) -> str:
 
 def extraire_infos(texte: str) -> dict:
     return {
-        "email": extraire_emails(texte),
+        "email":         extraire_emails(texte),
         "nom_gerant":    "",  # non fiable en regex — nécessite une passe IA ciblée
         "nb_annonces":   extraire_nb_annonces(texte),
         "taille_equipe": extraire_taille_equipe(texte),
@@ -187,6 +188,10 @@ def main():
 
     if not zips_restants:
         print("✅ Tous les zips ont déjà été traités.")
+        github_output = os.getenv("GITHUB_OUTPUT")
+        if github_output:
+            with open(github_output, "a", encoding="utf-8") as f:
+                f.write("restants_apres=0\n")
         return
 
     mode = "a" if reprise else "w"
@@ -237,6 +242,11 @@ def main():
     print(f"Sites traités       : {total_sites}")
     print(f"Zips restants       : {apres_ce_run}")
     print(f"Résultats           : {OUTPUT_CSV}")
+
+    github_output = os.getenv("GITHUB_OUTPUT")
+    if github_output:
+        with open(github_output, "a", encoding="utf-8") as f:
+            f.write(f"restants_apres={apres_ce_run}\n")
 
 
 if __name__ == "__main__":

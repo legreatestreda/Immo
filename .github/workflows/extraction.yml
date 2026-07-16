@@ -3,7 +3,7 @@ name: Extraction Infos Agences
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */5 * * *'   # toutes les 5h
+    - cron: '0 */1 * * *'   # toutes les 5h
 
 concurrency:
   group: extraction-infos
@@ -13,6 +13,9 @@ jobs:
   extraire:
     runs-on: ubuntu-latest
     timeout-minutes: 340
+    permissions:
+      contents: write
+      actions: write
 
     steps:
       - name: Checkout repo
@@ -29,6 +32,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Lancer l'extraction
+        id: extraction
         env:
           GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
           GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
@@ -45,4 +49,11 @@ jobs:
           git diff --staged --quiet || git commit -m "extraction: progression $(date +'%Y-%m-%d %H:%M')"
           git pull --rebase --autostash
           git push
-          
+
+      - name: Relancer automatiquement s'il reste des zips
+        if: steps.extraction.outputs.restants_apres != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Il reste ${{ steps.extraction.outputs.restants_apres }} zips — relance automatique."
+          gh workflow run extraction.yml --ref main

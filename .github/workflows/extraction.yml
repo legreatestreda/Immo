@@ -3,7 +3,7 @@ name: Extraction Infos Agences
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */1 * * *'   # toutes les 5h
+    - cron: '0 */5 * * *'   # toutes les 5h
 
 concurrency:
   group: extraction-infos
@@ -45,7 +45,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/resultats.csv data/progress.json || true
+          git add data/resultats.csv data/progress.json data/zips_bloques.txt || true
           git diff --staged --quiet || git commit -m "extraction: progression $(date +'%Y-%m-%d %H:%M')"
           git pull --rebase --autostash
           git push

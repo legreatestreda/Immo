@@ -28,6 +28,9 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Nettoyer les faux échecs (à retirer après usage)
+        run: python scripts/nettoyer_faux_echecs.py
+
       - name: Lancer la recherche
         id: recherche
         env:
@@ -45,9 +48,9 @@ jobs:
           git diff --staged --quiet || git commit -m "recherche email: progression $(date +'%Y-%m-%d %H:%M')"
           git pull --rebase --autostash
           git push
-          
-      - name: Relancer automatiquement s'il reste des agences
-        if: steps.recherche.outputs.restants_apres != '0'
+
+      - name: Relancer automatiquement s'il reste des agences (et si crédits dispo)
+        if: steps.recherche.outputs.restants_apres != '0' && steps.recherche.outputs.quota_epuise != '1'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

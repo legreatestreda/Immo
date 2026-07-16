@@ -117,13 +117,15 @@ TAILLE_EQUIPE_RE = re.compile(
 )
 
 
-def extraire_email(texte: str) -> str:
+def extraire_emails(texte: str) -> str:
+    trouves = []
     for match in EMAIL_RE.findall(texte):
         low = match.lower()
         if low.endswith(EMAIL_BLOCKLIST_EXT) or any(d in low for d in EMAIL_BLOCKLIST_DOMAINS):
             continue
-        return match
-    return ""
+        if match not in trouves:  # évite les doublons si le même email apparaît plusieurs fois
+            trouves.append(match)
+    return ", ".join(trouves)
 
 
 def extraire_crm(texte: str) -> str:
@@ -146,7 +148,7 @@ def extraire_taille_equipe(texte: str) -> str:
 
 def extraire_infos(texte: str) -> dict:
     return {
-        "email":         extraire_email(texte),
+        "email": extraire_emails(texte),,
         "nom_gerant":    "",  # non fiable en regex — nécessite une passe IA ciblée
         "nb_annonces":   extraire_nb_annonces(texte),
         "taille_equipe": extraire_taille_equipe(texte),

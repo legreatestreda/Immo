@@ -33,6 +33,10 @@ DATA_DIR         = "data"
 OUTPUT_CSV       = os.path.join(DATA_DIR, "resultats.csv")
 PROGRESS_FILE    = os.path.join(DATA_DIR, "progress.json")
 
+# Nombre max de zips traités par run — le run s'arrête proprement une fois
+# cette limite atteinte, et le prochain cron reprendra là où on s'est arrêté.
+MAX_ZIPS_PAR_RUN = 40
+
 CHAMPS_CSV = ["zip", "site", "email", "nom_gerant", "nb_annonces", "taille_equipe", "crm_detecte"]
 
 # ─── Google Drive ───────────────────────────────────────────────────────────
@@ -170,10 +174,17 @@ def main():
 
     drive = get_drive_service()
     zips  = lister_zips(drive)
-    zips_restants = [z for z in zips if z["name"] not in traites]
+    tous_restants = [z for z in zips if z["name"] not in traites]
+    zips_restants = tous_restants[:MAX_ZIPS_PAR_RUN]
+    apres_ce_run  = len(tous_restants) - len(zips_restants)
 
     print(f"{'▶️  Reprise' if reprise else '🚀 Démarrage'} — {len(zips)} zips au total | "
-          f"{len(traites)} déjà traités | {len(zips_restants)} restants\n")
+          f"{len(traites)} déjà traités | {len(tous_restants)} restants | "
+          f"{len(zips_restants)} traités dans ce run\n")
+
+    if not zips_restants:
+        print("✅ Tous les zips ont déjà été traités.")
+        return
 
     mode = "a" if reprise else "w"
     with open(OUTPUT_CSV, mode, newline="", encoding="utf-8") as f_out:
@@ -218,10 +229,11 @@ def main():
             traites.add(nom_zip)
             sauver_progress(traites)
 
-    print(f"\n─── TERMINÉ ───────────────────────────────")
-    print(f"Zips traités  : {len(zips_restants)}")
-    print(f"Sites traités : {total_sites}")
-    print(f"Résultats     : {OUTPUT_CSV}")
+    print(f"\n─── TERMINÉ (ce run) ───────────────────────")
+    print(f"Zips traités ce run : {len(zips_restants)}")
+    print(f"Sites traités       : {total_sites}")
+    print(f"Zips restants       : {apres_ce_run}")
+    print(f"Résultats           : {OUTPUT_CSV}")
 
 
 if __name__ == "__main__":

@@ -148,7 +148,7 @@ def extraire_taille_equipe(texte: str) -> str:
 
 def extraire_infos(texte: str) -> dict:
     return {
-        "email": extraire_emails(texte),,
+        "email": extraire_emails(texte),
         "nom_gerant":    "",  # non fiable en regex — nécessite une passe IA ciblée
         "nb_annonces":   extraire_nb_annonces(texte),
         "taille_equipe": extraire_taille_equipe(texte),

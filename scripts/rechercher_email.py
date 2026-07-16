@@ -45,7 +45,7 @@ def charger_cles_api() -> list:
 
 def appeler_serper(query: str, cles: list, index_cle: int):
     """Interroge Serper avec la clé courante. Si quota épuisé (403/429),
-    passe à la clé suivante et réessaie. Renvoie (json_ou_None, nouvel_index_cle)."""
+    passe à la clé suivante et réessaie. Renvoie (json_ou_None, nouvel_index_cle, statut)."""
     tentatives = 0
     while tentatives < len(cles):
         cle = cles[index_cle]
@@ -62,18 +62,26 @@ def appeler_serper(query: str, cles: list, index_cle: int):
             conn.close()
 
             if res.status == 200:
-                return json.loads(corps.decode("utf-8")), index_cle
+                return json.loads(corps.decode("utf-8")), index_cle, "ok"
 
-            if res.status in (403, 429):
-                # quota épuisé ou clé invalide -> clé suivante
-                print(f"      ⚠️  Clé #{index_cle + 1} épuisée/refusée (HTTP {res.status}), rotation...")
+            corps_texte = corps.decode("utf-8", errors="ignore")
+
+            # quota épuisé : Serper renvoie parfois 403/429, mais aussi 400
+            # avec le message "Not enough credits" -> il faut le détecter par contenu
+            quota_epuise = (
+                res.status in (403, 429)
+                or (res.status == 400 and "credit" in corps_texte.lower())
+            )
+
+            if quota_epuise:
+                print(f"      ⚠️  Clé #{index_cle + 1} épuisée (HTTP {res.status}), rotation...")
                 index_cle = (index_cle + 1) % len(cles)
                 tentatives += 1
                 continue
 
-            # autre erreur HTTP -> pas la peine de retenter avec une autre clé
-            print(f"      ❌ Erreur HTTP {res.status} : {corps.decode('utf-8', errors='ignore')[:200]}")
-            return None, index_cle
+            # autre erreur HTTP (ex: requête malformée) -> échec définitif pour cette ligne
+            print(f"      ❌ Erreur HTTP {res.status} : {corps_texte[:200]}")
+            return None, index_cle, "echec_definitif"
 
         except Exception as e:
             print(f"      ❌ Erreur réseau : {e}")
@@ -81,8 +89,8 @@ def appeler_serper(query: str, cles: list, index_cle: int):
             tentatives += 1
             continue
 
-    print("      ❌ Toutes les clés API sont épuisées ou invalides.")
-    return None, index_cle
+    print("      ⏸️  Toutes les clés API sont épuisées (crédits insuffisants).")
+    return None, index_cle, "toutes_cles_epuisees"
 
 # ─── Progress ───────────────────────────────────────────────────────────────
 
@@ -148,10 +156,23 @@ def main():
                 print("⏭️  pas d'email, ignoré")
                 continue
 
-            resultat, index_cle = appeler_serper(email, cles, index_cle)
+            resultat, index_cle, statut = appeler_serper(email, cles, index_cle)
+
+            if statut == "toutes_cles_epuisees":
+                print("⏸️  quota épuisé sur toutes les clés — arrêt du run")
+                print(f"\n─── ARRÊT ANTICIPÉ (crédits épuisés) ─────")
+                print(f"Agences traitées avant arrêt : {i - 1}")
+                restant_reel = len(restantes) - (i - 1)
+                print(f"Agences restantes             : {restant_reel}")
+                github_output = os.getenv("GITHUB_OUTPUT")
+                if github_output:
+                    with open(github_output, "a", encoding="utf-8") as gh:
+                        gh.write(f"restants_apres={restant_reel}\n")
+                        gh.write("quota_epuise=1\n")
+                return
 
             if resultat is None:
-                logger_email_bloque(uid, "requête échouée (voir logs)")
+                logger_email_bloque(uid, "échec définitif (voir logs)")
                 traites.add(uid)
                 sauver_progress(traites)
                 print("❌")

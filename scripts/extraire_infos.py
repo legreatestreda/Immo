@@ -48,10 +48,11 @@ def get_drive_service():
         client_id=os.environ["GOOGLE_OAUTH_CLIENT_ID"],
         client_secret=os.environ["GOOGLE_OAUTH_CLIENT_SECRET"],
         token_uri="https://oauth2.googleapis.com/token",
-        scopes=["https://www.googleapis.com/auth/drive.readonly"],
+        # scopes volontairement omis : le forcer ici peut provoquer une
+        # erreur "invalid_scope" au refresh s'il ne correspond pas EXACTEMENT
+        # au scope réellement accordé lors de la création du refresh_token.
     )
     return build("drive", "v3", credentials=creds, cache_discovery=False)
-
 
 def lister_zips(service):
     resultats, page_token = [], None

@@ -32,6 +32,7 @@ GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID")
 DATA_DIR         = "data"
 OUTPUT_CSV       = os.path.join(DATA_DIR, "resultats.csv")
 PROGRESS_FILE    = os.path.join(DATA_DIR, "progress.json")
+ZIPS_BLOQUES_FILE = os.path.join(DATA_DIR, "zips_bloques.txt")
 
 # Nombre max de zips traités par run — le run s'arrête proprement une fois
 # cette limite atteinte, et le prochain cron reprendra là où on s'est arrêté.
@@ -169,6 +170,11 @@ def sauver_progress(traites: set):
     with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
         json.dump({"traites": list(traites)}, f)
 
+
+def logger_zip_bloque(nom_zip: str, raison: str):
+    with open(ZIPS_BLOQUES_FILE, "a", encoding="utf-8") as f:
+        f.write(f"{nom_zip}\t{raison}\n")
+
 # ─── Main ───────────────────────────────────────────────────────────────────
 
 def main():
@@ -209,6 +215,9 @@ def main():
                 contenu = telecharger_zip(drive, fichier["id"])
             except Exception as e:
                 print(f"   ❌ Téléchargement échoué : {e}")
+                logger_zip_bloque(nom_zip, f"téléchargement échoué: {e}")
+                traites.add(nom_zip)  # évite de le retenter à chaque run
+                sauver_progress(traites)
                 continue
 
             sites: dict[str, str] = {}
@@ -222,6 +231,9 @@ def main():
                             sites[site_id] = sites.get(site_id, "") + " " + html_to_text(html)
             except Exception as e:
                 print(f"   ❌ Lecture zip échouée : {e}")
+                logger_zip_bloque(nom_zip, f"lecture échouée: {e}")
+                traites.add(nom_zip)  # évite de le retenter à chaque run
+                sauver_progress(traites)
                 continue
 
             for site_id, texte_complet in sites.items():

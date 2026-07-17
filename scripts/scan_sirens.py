@@ -216,12 +216,13 @@ def git_commit_and_push(message: str, max_retries: int = 5):
         push = subprocess.run(["git", "push"], cwd=REPO_ROOT)
         if push.returncode == 0:
             return
-        log(f"  [git] push rejected (attempt {attempt}/{max_retries}), "
-            f"fetching + rebasing before retry")
+        print(f"  [git] push rejected (attempt {attempt}/{max_retries}), "
+              f"fetching + rebasing before retry", file=sys.stderr)
         subprocess.run(["git", "fetch", "origin"], cwd=REPO_ROOT, check=True)
         rebase = subprocess.run(["git", "rebase", "origin/main"], cwd=REPO_ROOT)
         if rebase.returncode != 0:
-            log("  [git] rebase conflict, aborting rebase and giving up on this push")
+            print("  [git] rebase conflict, aborting rebase and giving up on this push",
+                  file=sys.stderr)
             subprocess.run(["git", "rebase", "--abort"], cwd=REPO_ROOT)
             raise RuntimeError("git push failed after rebase conflict")
         time.sleep(2)

@@ -5,7 +5,7 @@ via Tavily (primary, 3 accounts) then Serper (fallback, 2 accounts), and save
 raw search results. SIREN extraction is a separate later step -- this script
 only collects raw results.
 
-Resumable: progress is tracked in data/progress.json (last_index processed).
+Resumable: progress is tracked in data/siren_progress.json (last_index processed).
 Runs batches of BATCH_SIZE rows, committing + pushing after every batch, and
 keeps going immediately into the next batch (no fixed wait) until either:
   - the whole CSV is processed, or
@@ -30,7 +30,7 @@ import requests
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CSV_PATH = REPO_ROOT / "data" / "recherche_email_clean_avec_villes.csv"
-PROGRESS_PATH = REPO_ROOT / "data" / "progress.json"
+PROGRESS_PATH = REPO_ROOT / "data" / "siren_progress.json"
 RESULTS_PATH = REPO_ROOT / "data" / "results.jsonl"
 
 BATCH_SIZE = 100
@@ -163,11 +163,18 @@ def search_with_rotation(query: str):
 # ---------------------------------------------------------------------------
 
 def load_progress(total_rows: int) -> dict:
+    data = {}
     if PROGRESS_PATH.exists():
-        with open(PROGRESS_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    else:
-        data = {"last_index": -1, "total": total_rows}
+        try:
+            with open(PROGRESS_PATH, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if content:
+                    data = json.loads(content)
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"Warning: could not read siren_progress.json ({e}), starting fresh",
+                  file=sys.stderr)
+            data = {}
+    data.setdefault("last_index", -1)
     data["total"] = total_rows
     return data
 
@@ -184,7 +191,7 @@ def append_result(record: dict):
 
 def git_commit_and_push(message: str):
     """Commit + push data/ changes. No-op (with a warning) if nothing changed."""
-    subprocess.run(["git", "add", "data/results.jsonl", "data/progress.json"],
+    subprocess.run(["git", "add", "data/results.jsonl", "data/siren_progress.json"],
                     cwd=REPO_ROOT, check=True)
     diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=REPO_ROOT)
     if diff.returncode == 0:
@@ -274,3 +281,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+      

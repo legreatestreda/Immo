@@ -1,0 +1,45 @@
+name: SIREN Scan
+
+on:
+  workflow_dispatch: {}       # manual "start now" button in the Actions tab
+  schedule:
+    # Safety net only: if a run stopped early (e.g. all API keys exhausted
+    # for the day), this picks it back up automatically. Batches inside a
+    # single run already chain back-to-back with no wait in between.
+    - cron: "0 */6 * * *"      # every 6 hours
+
+permissions:
+  contents: write
+
+concurrency:
+  group: siren-scan
+  cancel-in-progress: false   # never kill a run mid-batch; queue instead
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350       # stay under the 360 min hosted-runner job limit
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Configure git identity
+        run: |
+          git config user.name "siren-scan-bot"
+          git config user.email "actions@users.noreply.github.com"
+
+      - name: Run scan
+        env:
+          TAVILY_KEYS: ${{ secrets.TAVILY_KEYS }}
+          SERPER_KEYS: ${{ secrets.SERPER_KEYS }}
+        run: python scripts/scan_sirens.py

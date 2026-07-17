@@ -1,0 +1,61 @@
+name: Extraire SIREN
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */5 * * *'
+
+concurrency:
+  group: extraire-siren
+  cancel-in-progress: false
+
+jobs:
+  extraire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installer dépendances
+        run: pip install google-api-python-client google-auth beautifulsoup4
+
+      - name: Extraire les SIREN
+        id: extraction
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+        run: python scripts/extraire_siren.py
+
+      - name: Commit résultats
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/sirens_par_agence.csv || true
+          git add data/progress_sirens.json || true
+          git add data/zips_bloques.txt || true
+          git diff --staged --quiet || git commit -m "extraction sirens: progression $(date +'%Y-%m-%d %H:%M')"
+          git pull --rebase --autostash
+          git push
+
+      - name: Relancer automatiquement s'il reste des zips
+        if: steps.extraction.outputs.restants_apres != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Il reste ${{ steps.extraction.outputs.restants_apres }} zips — relance automatique."
+          gh workflow run extraire_siren.yml --ref main

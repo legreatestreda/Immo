@@ -32,6 +32,18 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 CSV_PATH = REPO_ROOT / "data" / "recherche_email_clean_avec_villes.csv"
 PROGRESS_PATH = REPO_ROOT / "data" / "siren_progress.json"
 RESULTS_PATH = REPO_ROOT / "data" / "results.jsonl"
+LOG_PATH = REPO_ROOT / "data" / "siren_scan.log"
+
+
+def log(message: str):
+    """Print to the Actions console AND append to a persistent log file
+    that gets committed alongside results/progress each batch."""
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{timestamp}] {message}"
+    print(line, file=sys.stderr)
+    with open(LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
 
 BATCH_SIZE = 100
 QUERY_TEMPLATE = "{nom_agence} immobilier societe.com"
@@ -96,15 +108,14 @@ def search_tavily(query: str):
                 timeout=REQUEST_TIMEOUT,
             )
             if resp.status_code in TAVILY_EXHAUSTED_STATUS:
-                print(f"  [tavily] key ...{key[-6:]} exhausted/rejected "
-                      f"(HTTP {resp.status_code}), rotating", file=sys.stderr)
+                log(f"  [tavily] key ...{key[-6:]} exhausted/rejected "
+                    f"(HTTP {resp.status_code}), rotating")
                 tavily_pool.mark_dead(key)
                 continue
             resp.raise_for_status()
             return resp.json(), key
         except requests.RequestException as e:
-            print(f"  [tavily] key ...{key[-6:]} request error: {e}, rotating",
-                  file=sys.stderr)
+            log(f"  [tavily] key ...{key[-6:]} request error: {e}, rotating")
             tavily_pool.mark_dead(key)
             continue
     return None, None
@@ -127,15 +138,14 @@ def search_serper(query: str):
                 timeout=REQUEST_TIMEOUT,
             )
             if resp.status_code in SERPER_EXHAUSTED_STATUS:
-                print(f"  [serper] key ...{key[-6:]} exhausted/rejected "
-                      f"(HTTP {resp.status_code}), rotating", file=sys.stderr)
+                log(f"  [serper] key ...{key[-6:]} exhausted/rejected "
+                    f"(HTTP {resp.status_code}), rotating")
                 serper_pool.mark_dead(key)
                 continue
             resp.raise_for_status()
             return resp.json(), key
         except requests.RequestException as e:
-            print(f"  [serper] key ...{key[-6:]} request error: {e}, rotating",
-                  file=sys.stderr)
+            log(f"  [serper] key ...{key[-6:]} request error: {e}, rotating")
             serper_pool.mark_dead(key)
             continue
     return None, None
@@ -171,8 +181,7 @@ def load_progress(total_rows: int) -> dict:
                 if content:
                     data = json.loads(content)
         except (json.JSONDecodeError, OSError) as e:
-            print(f"Warning: could not read siren_progress.json ({e}), starting fresh",
-                  file=sys.stderr)
+            log(f"Warning: could not read siren_progress.json ({e}), starting fresh")
             data = {}
     data.setdefault("last_index", -1)
     data["total"] = total_rows
@@ -189,16 +198,35 @@ def append_result(record: dict):
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def git_commit_and_push(message: str):
-    """Commit + push data/ changes. No-op (with a warning) if nothing changed."""
-    subprocess.run(["git", "add", "data/results.jsonl", "data/siren_progress.json"],
-                    cwd=REPO_ROOT, check=True)
+def git_commit_and_push(message: str, max_retries: int = 5):
+    """Commit + push data/ changes. No-op (with a warning) if nothing changed.
+    If the push is rejected because the remote moved on (concurrent run,
+    manual edit on GitHub, etc.), fetch + rebase and retry a few times
+    before giving up.
+    """
+    subprocess.run(["git", "add", "data/results.jsonl", "data/siren_progress.json",
+                     "data/siren_scan.log"], cwd=REPO_ROOT, check=True)
     diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=REPO_ROOT)
     if diff.returncode == 0:
-        print("  [git] nothing to commit", file=sys.stderr)
+        log("  [git] nothing to commit")
         return
     subprocess.run(["git", "commit", "-m", message], cwd=REPO_ROOT, check=True)
-    subprocess.run(["git", "push"], cwd=REPO_ROOT, check=True)
+
+    for attempt in range(1, max_retries + 1):
+        push = subprocess.run(["git", "push"], cwd=REPO_ROOT)
+        if push.returncode == 0:
+            return
+        log(f"  [git] push rejected (attempt {attempt}/{max_retries}), "
+            f"fetching + rebasing before retry")
+        subprocess.run(["git", "fetch", "origin"], cwd=REPO_ROOT, check=True)
+        rebase = subprocess.run(["git", "rebase", "origin/main"], cwd=REPO_ROOT)
+        if rebase.returncode != 0:
+            log("  [git] rebase conflict, aborting rebase and giving up on this push")
+            subprocess.run(["git", "rebase", "--abort"], cwd=REPO_ROOT)
+            raise RuntimeError("git push failed after rebase conflict")
+        time.sleep(2)
+
+    raise RuntimeError(f"git push failed after {max_retries} attempts")
 
 
 # ---------------------------------------------------------------------------
@@ -207,8 +235,7 @@ def git_commit_and_push(message: str):
 
 def main():
     if not TAVILY_KEYS and not SERPER_KEYS:
-        print("No API keys provided (TAVILY_KEYS / SERPER_KEYS env vars empty). "
-              "Aborting.", file=sys.stderr)
+        log("No API keys provided (TAVILY_KEYS / SERPER_KEYS env vars empty). Aborting.")
         sys.exit(1)
 
     with open(CSV_PATH, "r", encoding="utf-8") as f:
@@ -219,29 +246,29 @@ def main():
     start_index = progress["last_index"] + 1
 
     if start_index >= total_rows:
-        print(f"Already complete: {total_rows}/{total_rows} rows processed. Nothing to do.")
+        log(f"Already complete: {total_rows}/{total_rows} rows processed. Nothing to do.")
         return
 
-    print(f"Resuming from row {start_index}/{total_rows}")
+    log(f"Resuming from row {start_index}/{total_rows}")
 
     while start_index < total_rows:
         batch_end = min(start_index + BATCH_SIZE, total_rows)
-        print(f"\n=== Batch: rows {start_index}..{batch_end - 1} ===")
+        log(f"=== Batch: rows {start_index}..{batch_end - 1} ===")
 
         for i in range(start_index, batch_end):
             row = rows[i]
             nom_agence = (row.get("nom_agence") or "").strip()
             ville = (row.get("ville") or "").strip()
             query = QUERY_TEMPLATE.format(nom_agence=nom_agence)
+            pct = (i + 1) / total_rows * 100
 
-            print(f"[{i}] {query}")
+            log(f"[{i + 1}/{total_rows} | {pct:.1f}%] {query}")
 
             result = search_with_rotation(query)
 
             if result is None:
-                print("All provider keys exhausted/failing. Stopping run; "
-                      "a later scheduled run will resume from here.",
-                      file=sys.stderr)
+                log("All provider keys exhausted/failing. Stopping run; "
+                    "a later scheduled run will resume from here.")
                 # Persist whatever we have so far, then exit without error
                 # so the workflow doesn't get marked as failed.
                 progress["last_index"] = i - 1
@@ -276,9 +303,9 @@ def main():
 
         start_index = batch_end
 
-    print(f"\nAll {total_rows} rows processed. Done.")
+    log(f"All {total_rows} rows processed. Done.")
 
 
 if __name__ == "__main__":
     main()
-      
+          

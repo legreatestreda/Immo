@@ -1,0 +1,51 @@
+name: Enrichir SIREN via API gouv
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */2 * * *'   # toutes les 2h (API gratuite, pas de souci de quota)
+
+concurrency:
+  group: enrichir-siren
+  cancel-in-progress: false
+
+jobs:
+  enrichir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Lancer l'enrichissement
+        id: enrichir
+        run: python scripts/enrichir_siren.py
+
+      - name: Commit résultats
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/sirens_enrichis.csv || true
+          git diff --staged --quiet || git commit -m "enrichissement siren: progression $(date +'%Y-%m-%d %H:%M')"
+          git pull --rebase --autostash
+          git push
+
+      - name: Relancer automatiquement s'il reste des SIREN
+        if: steps.enrichir.outputs.restants_apres != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Il reste ${{ steps.enrichir.outputs.restants_apres }} SIREN — relance automatique."
+          gh workflow run enrichir_siren.yml --ref main

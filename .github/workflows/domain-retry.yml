@@ -1,0 +1,42 @@
+name: SIREN Domain Retry
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 */6 * * *"   # safety net, same pattern as the main scan
+
+permissions:
+  contents: write
+
+concurrency:
+  group: siren-domain-retry
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Configure git identity
+        run: |
+          git config user.name "siren-scan-bot"
+          git config user.email "actions@users.noreply.github.com"
+
+      - name: Run domain retry scan
+        env:
+          TAVILY_KEYS: ${{ secrets.TAVILY_KEYS }}
+          SERPER_KEYS: ${{ secrets.SERPER_KEYS }}
+        run: python scripts/rescan_domain.py
